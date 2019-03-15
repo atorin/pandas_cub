@@ -100,7 +100,22 @@ class DataFrame:
         -------
         None
         """
-        pass
+        if not isinstance(columns, list):
+            raise TypeError("`columns` must be a list")
+
+        if len(columns) != len(self.columns):
+            raise ValueError("`columns` must have the same number of elements than the original")
+
+        for col in columns:
+            if not isinstance(col, str):
+                raise TypeError("all column names must be strings")
+
+        if len(set(columns)) != len(columns):
+            raise ValueError("`columns` names must not contain duplicates")
+
+        self._data = dict(zip(columns, self._data.values()))
+
+       
 
     @property
     def shape(self):
@@ -109,7 +124,7 @@ class DataFrame:
         -------
         two-item tuple of number of rows and columns
         """
-        pass
+        return len(self), len(self._data)
 
     def _repr_html_(self):
         """
@@ -143,7 +158,61 @@ class DataFrame:
             </tbody>
         </table>
         """
-        pass
+        html = '<table><thead><tr><th></th>'
+        for col in self.columns:
+            html += f"<th>{col:10}</th>"
+
+        html += '</tr></thead>'
+        html += "<tbody>"
+
+        only_head = False
+        num_head = 10
+        num_tail = 10
+        if len(self) <= 20:
+            only_head = True
+            num_head = len(self)
+
+        for i in range(num_head):
+            html += f'<tr><td><strong>{i}</strong></td>'
+            for col, values in self._data.items():
+                kind = values.dtype.kind
+                if kind == 'f':
+                    html += f'<td>{values[i]:10.3f}</td>'
+                elif kind == 'b':
+                    html += f'<td>{values[i]}</td>'
+                elif kind == 'O':
+                    v = values[i]
+                    if v is None:
+                        v = 'None'
+                    html += f'<td>{v:10}</td>'
+                else:
+                    html += f'<td>{values[i]:10}</td>'
+            html += '</tr>'
+
+        if not only_head:
+            html += '<tr><strong><td>...</td></strong>'
+            for i in range(len(self.columns)):
+                html += '<td>...</td>'
+            html += '</tr>'
+            for i in range(-num_tail, 0):
+                html += f'<tr><td><strong>{len(self) + i}</strong></td>'
+                for col, values in self._data.items():
+                    kind = values.dtype.kind
+                    if kind == 'f':
+                        html += f'<td>{values[i]:10.3f}</td>'
+                    elif kind == 'b':
+                        html += f'<td>{values[i]}</td>'
+                    elif kind == 'O':
+                        v = values[i]
+                        if v is None:
+                            v = 'None'
+                        html += f'<td>{v:10}</td>'
+                    else:
+                        html += f'<td>{values[i]:10}</td>'
+                html += '</tr>'
+
+        html += '</tbody></table>'
+        return html
 
     @property
     def values(self):
@@ -152,7 +221,8 @@ class DataFrame:
         -------
         A single 2D NumPy array of the underlying data
         """
-        pass
+        return np.column_stack(list(self._data.values()))
+    
 
     @property
     def dtypes(self):
@@ -163,7 +233,14 @@ class DataFrame:
         their data type in the other
         """
         DTYPE_NAME = {'O': 'string', 'i': 'int', 'f': 'float', 'b': 'bool'}
-        pass
+        col_names = np.array(list(self._data.keys()))
+        dtypes = [DTYPE_NAME[value.dtype.kind] for value in self._data.values()]
+        dtypes = np.array(dtypes)
+
+        new_data = {"Column Name":col_names, "Data Type":dtypes}
+
+        return DataFrame(new_data)
+
 
     def __getitem__(self, item):
         """
@@ -179,11 +256,60 @@ class DataFrame:
         -------
         A subset of the original DataFrame
         """
-        pass
+        
+        if isinstance(item,str):
+            return DataFrame({item:self._data[item]})
 
+        if isinstance(item,list):
+            return DataFrame({col: self._data[col] for col in item })
+
+        if isinstance(item, DataFrame):
+            if item.shape[1] > 1:
+                raise ValueError("`item` must be a one-column DataFrame")
+
+            arr = next(iter(item._data.values()))
+
+            if arr.dtype.kind != 'b':
+                raise ValueError("`item` must be a one-column boolean DataFrame")
+
+            return DataFrame({col: value[arr] for col,value in self._data.items()})
+
+        if isinstance(item, tuple):
+            return self._getitem_tuple(item)
+
+        raise TypeError("`item` type not supported. Provide str, list, DataFrame or tuple \
+        to the selection operator")
+            
     def _getitem_tuple(self, item):
         # simultaneous selection of rows and cols -> df[rs, cs]
-        pass
+        if len(item) != 2:
+            raise ValueError("`item` tuple must be of length 2")
+
+        row_selection,col_selection = item
+        if isinstance(row_selection,int):
+            row_selection = [row_selection]
+        elif isinstance(row_selection, DataFrame):
+            if row_selection.shape[1] != 1:
+                raise ValueError("row_selection DataFrame must have one column")
+
+            row_selection = next(iter(row_selection._data.values()))
+            if row_selection.dtype.kind != 'b':
+                raise TypeError("row_selection must be a boolean DataFrame")
+        elif not isinstance(row_selection, (list,slice)):
+            raise TypeError("row_selection must be either a list or a slice")
+
+
+        if isinstance(col_selection,int):
+            col_selection = [self.columns[col_selection]]
+        elif isinstance(col_selection,str):
+            col_selection = [col_selection]
+
+        new_data = {}
+        for col in col_selection:
+            new_data[col] = self._data[col][row_selection]
+
+        return DataFrame(new_data)
+
 
     def _ipython_key_completions_(self):
         # allows for tab completion when doing df['c
